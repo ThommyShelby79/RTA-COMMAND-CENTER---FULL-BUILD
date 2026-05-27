@@ -1,0 +1,299 @@
+"""
+RTA Command Center Dashboard
+Real-Time Adherence Monitoring System
+Production-Ready Streamlit Application
+"""
+
+import streamlit as st
+import pandas as pd
+import io
+import os
+from datetime import datetime
+from calculations import RTACalculations
+from visualizations import RTAVisualizations
+
+# Page configuration
+st.set_page_config(
+    page_title="RTA Command Center",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown("""
+<style>
+    .big-metric {
+        font-size: 2.5rem;
+        font-weight: bold;
+    }
+    .metric-container {
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        background-color: #f0f2f6;
+        margin: 1rem 0;
+    }
+    .alert-box {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
+    .alert-critical {
+        background-color: #ff4444;
+        color: white;
+    }
+    .alert-warning {
+        background-color: #ffaa00;
+        color: black;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Header
+st.title("📊 RTA Command Center")
+st.markdown("**Real-Time Adherence Monitoring Dashboard**")
+st.markdown("Built by Hatem Shalaby | RTA Automation Expert")
+st.markdown("---")
+
+# Sidebar configuration
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    
+    st.subheader("📤 Upload Data")
+    uploaded_file = st.file_uploader(
+        "Upload Schedule CSV",
+        type=['csv'],
+        help="CSV must contain: agent_id, agent_name, scheduled_start, scheduled_end, actual_start, actual_end, break_scheduled, break_actual"
+    )
+    
+    st.subheader("🚨 Alert Settings")
+    alert_threshold = st.slider(
+        "Alert Threshold (minutes)",
+        min_value=5,
+        max_value=30,
+        value=10,
+        step=5,
+        help="Generate alerts when variance exceeds this threshold"
+    )
+    
+    st.subheader("🔍 Filter Options")
+    show_all = st.checkbox("Show All Agents", value=True)
+    if not show_all:
+        status_filter = st.multiselect(
+            "Filter by Status",
+            ["✅ Adherent", "⚠️ At Risk", "❌ Out of Adherence"],
+            default=["❌ Out of Adherence"]
+        )
+    
+    st.markdown("---")
+    st.markdown("### 📖 Quick Guide")
+    st.markdown("""
+    **Adherence Levels:**
+    - 🟢 ≥95%: Adherent
+    - 🟡 90-95%: At Risk  
+    - 🔴 <90%: Out of Adherence
+    
+    **CSV Format Required:**
+agent_id, agent_name, scheduled_start,
+scheduled_end, actual_start, actual_end,
+break_scheduled, break_actual
+**Time Format:** HH:MM (24-hour)
+    **Break Times:** Minutes as integers
+    """)
+
+# Main content area
+if uploaded_file is None:
+    st.info("👈 **Upload a CSV file in the sidebar to get started**")
+    st.markdown("### 📥 Sample CSV Format")
+    st.code("""agent_id,agent_name,scheduled_start,scheduled_end,actual_start,actual_end,break_scheduled,break_actual
+A001,Sarah Johnson,09:00,17:00,09:02,17:05,60,58
+A002,Michael Chen,09:00,17:00,08:55,16:50,60,65
+A003,Emily Rodriguez,08:00,16:00,08:10,16:15,60,55""", language="csv")
+    
+    if st.button("📥 Load Sample Data"):
+        # Create sample data inline
+        sample_data = pd.DataFrame({
+            'agent_id': ['A001', 'A002', 'A003', 'A004', 'A005', 'A006', 'A007', 'A008', 'A009', 'A010'],
+            'agent_name': ['Sarah Johnson', 'Michael Chen', 'Emily Rodriguez', 'David Kim', 'Jessica Martinez',
+                          'James Wilson', 'Amanda Taylor', 'Christopher Lee', 'Ashley Brown', 'Daniel Garcia'],
+            'scheduled_start': ['09:00']*10,
+            'scheduled_end': ['17:00']*10,
+            'actual_start': ['09:02', '08:55', '08:10', '10:00', '09:05', '08:00', '10:15', '09:00', '08:05', '10:00'],
+            'actual_end': ['17:05', '16:50', '16:15', '18:00', '16:45', '16:00', '17:50', '17:10', '15:50', '18:05'],
+            'break_scheduled': [60]*10,
+            'break_actual': [58, 65, 55, 60, 70, 60, 65, 55, 75, 58]
+        })
+        st.session_state['data'] = sample_data
+        st.success("✅ Sample data loaded! Refresh to see dashboard")
+        st.rerun()
+
+else:
+    # Process uploaded file
+    try:
+        df_raw = pd.read_csv(uploaded_file)
+        st.session_state['data'] = df_raw
+        st.success(f"✅ Loaded {len(df_raw)} agent records")
+    except Exception as e:
+        st.error(f"❌ Error loading file: {str(e)}")
+
+# Display dashboard if data is available
+if 'data' in st.session_state:
+    df_raw = st.session_state['data']
+    
+    # Calculate adherence
+    with st.spinner("Calculating adherence metrics..."):
+        try:
+            df_results = RTACalculations.calculate_adherence(df_raw)
+            summary = RTACalculations.calculate_summary_metrics(df_results)
+            alerts = RTACalculations.generate_alerts(df_results, threshold_minutes=alert_threshold)
+        except Exception as e:
+            st.error(f"❌ Calculation error: {str(e)}")
+            st.stop()
+    
+    # Apply filters
+    if not show_all:
+        df_filtered = df_results[df_results['status'].isin(status_filter)]
+    else:
+        df_filtered = df_results
+    
+    # Summary Metrics Section
+    st.subheader("📈 Key Metrics")
+    fig_metrics = RTAVisualizations.create_summary_metrics_chart(summary)
+    st.plotly_chart(fig_metrics, use_container_width=True)
+    
+    # Alerts Section
+    if alerts:
+        st.subheader(f"🚨 Active Alerts ({len(alerts)})")
+        
+        col1, col2 = st.columns(2)
+        
+        critical_alerts = [a for a in alerts if abs(a['variance_minutes']) >= 20]
+        warning_alerts = [a for a in alerts if abs(a['variance_minutes']) < 20]
+        
+        with col1:
+            st.markdown("**Critical Alerts (≥20 min variance)**")
+            if critical_alerts:
+                for alert in critical_alerts:
+                    st.markdown(f"""
+                    <div class="alert-box alert-critical">
+                        <strong>{alert['agent_name']}</strong> ({alert['agent_id']})<br>
+                        {alert['alert_type']}: {abs(alert['variance_minutes'])} minutes<br>
+                        Adherence: {alert['adherence_pct']}%
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.success("✅ No critical alerts")
+        
+        with col2:
+            st.markdown("**Warning Alerts (10-19 min variance)**")
+            if warning_alerts:
+                for alert in warning_alerts:
+                    st.markdown(f"""
+                    <div class="alert-box alert-warning">
+                        <strong>{alert['agent_name']}</strong> ({alert['agent_id']})<br>
+                        {alert['alert_type']}: {abs(alert['variance_minutes'])} minutes<br>
+                        Adherence: {alert['adherence_pct']}%
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.success("✅ No warning alerts")
+        
+        st.markdown("---")
+    else:
+        st.success("✅ No alerts - All agents within acceptable thresholds")
+        st.markdown("---")
+    
+    # Visualizations
+    tab1, tab2, tab3 = st.tabs(["📊 Adherence Overview", "📉 Variance Analysis", "📋 Data Table"])
+    
+    with tab1:
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.plotly_chart(RTAVisualizations.create_adherence_bar_chart(df_filtered), use_container_width=True)
+        
+        with col2:
+            st.plotly_chart(RTAVisualizations.create_status_pie_chart(summary), use_container_width=True)
+    
+    with tab2:
+        st.plotly_chart(RTAVisualizations.create_variance_chart(df_filtered), use_container_width=True)
+    
+    with tab3:
+        st.subheader("Detailed Agent Data")
+        
+        # Display dataframe
+        display_columns = ['agent_id', 'agent_name', 'scheduled_start', 'scheduled_end',
+                          'actual_start', 'actual_end', 'scheduled_time', 'actual_time',
+                          'adherence_pct', 'variance_minutes', 'status']
+        
+        df_display = df_filtered[display_columns].copy()
+        
+        st.dataframe(
+            df_display,
+            use_container_width=True,
+            height=400,
+            column_config={
+                'adherence_pct': st.column_config.NumberColumn(label='Adherence %', format="%.2f%%"),
+                'variance_minutes': st.column_config.NumberColumn(label='Variance (min)', format="%d"),
+            }
+        )
+        
+        # Export options
+        st.markdown("---")
+        st.subheader("💾 Export Options")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Export to Excel
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_filtered.to_excel(writer, sheet_name='Adherence Report', index=False)
+                summary_df = pd.DataFrame([summary])
+                summary_df.to_excel(writer, sheet_name='Summary', index=False)
+            
+            buffer.seek(0)
+            st.download_button(
+                label="📥 Download Excel Report",
+                data=buffer.getvalue(),
+                file_name=f"rta_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
+        with col2:
+            # Export filtered CSV
+            csv = df_filtered.to_csv(index=False)
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv,
+                file_name=f"rta_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        
+        with col3:
+            # Export alerts
+            if alerts:
+                alerts_df = pd.DataFrame(alerts)
+                alerts_csv = alerts_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Alerts",
+                    data=alerts_csv,
+                    file_name=f"rta_alerts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; color: gray;'>
+    <p><strong>RTA Command Center v1.0</strong></p>
+    <p>Built by <strong>Hatem Shalaby</strong> | RTA & WFM Automation Expert</p>
+    <p>
+        <a href='https://github.com/hatemismail2011shalaby' target='_blank'>GitHub</a> | 
+        <a href='https://linkedin.com/in/hatem-shalaby-7359611a2' target='_blank'>LinkedIn</a> |
+        <a href='https://hatemismail2011shalaby.github.io/RTA-Operations-Portfolio/' target='_blank'>Portfolio</a>
+    </p>
+    <p style='font-size: 0.8rem;'>Last updated: {}</p>
+</div>
+""".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")), unsafe_allow_html=True)
+
