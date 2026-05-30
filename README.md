@@ -74,3 +74,7 @@ streamlit run src/app.py
 
 **Hatem Shalaby** — Operations Architect & Automation Engineer
 [LinkedIn](https://www.google.com/search?q=https://www.linkedin.com/in/hatem-shalaby-7359611a2) · [Portfolio](https://www.google.com/search?q=https://hatemismail2011shalaby.github.io/RTA-Operations-Portfolio/) · [Email]()
+
+## Run Instructions
+Always run from the src directory to avoid path conflicts:
+`streamlit run src/app.py`
